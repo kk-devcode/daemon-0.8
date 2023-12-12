@@ -1,0 +1,219 @@
+#!/bin/sh
+#
+# daemon - https://libslack.org/daemon
+#
+# Copyright (C) 1999-2004, 2010, 2020-2023 raf <raf@raf.org>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, see <https://www.gnu.org/licenses/>.
+#
+# 20230824 raf <raf@raf.org>
+#
+
+# Handle --default (for distribution)
+
+case "$1" in
+	--default|default)
+		set -- --platform=Linux --prefix=default --destdir= --disable-logind  --enable-mail-test
+		CC=
+		;;
+esac
+
+die() { echo "$0: $@" >&2; exit 1; }
+
+PLATFORM=
+
+for opt in "$@"
+do
+	case "$opt" in
+		--help|-h)
+			echo "$0 [options]"
+			echo "options:"
+			echo "  --help              - Print this message then exit"
+			echo "  --prefix=/path      - Override platform-specific installation prefix"
+			echo "  --destdir=/path     - Override DESTDIR in Makefile for building packages"
+			echo "  --enable-logind     - Enable logind/elogind support (i.e. --bind option)"
+			echo "  --disable-logind    - Disable logind/elogind support (i.e. --bind option)"
+			echo "  --enable-mail-test  - Enable sending an email during tests (default)"
+			echo "  --disable-mail-test - Disable sending an email during tests"
+			echo "  --enable-test       - Include backup implementations of some functions (don't)"
+			echo "  --default           - Restore Makefile (et al.) to default state (for distribution)"
+			echo "  --platform=platform - Override platform (one of the below) for --default"
+			echo
+			echo "This configure script knows what to do for several platforms:"
+			echo
+			echo "  Linux, macOS, FreeBSD, OpenBSD, NetBSD, GNU/kFreeBSD, GNU/Hurd, Solaris"
+			echo ""
+			echo "To override a platform-specific install prefix, use --prefix (e.g. /opt/local)."
+			echo "Note: For --prefix=default and --prefix=/usr, /etc and /var/run are still used."
+			echo "For other values, these paths are affected by the prefix."
+			echo ""
+			echo "To override the makefile \$(DESTDIR), use --destdir."
+			echo "This is for building packages and doesn't affect paths in the final binary."
+			echo ""
+			echo "On Linux systems with libsystemd or libelogind headers and libraries installed,"
+			echo "use --enable-logind to use them for daemon's --bind option."
+			echo ""
+			echo "To undo the effects of --enable-logind, use --disable-logind."
+			echo ""
+			echo "When creating packages, use --disable-mail-test to suppress an internal"
+			echo "test that sends an email message."
+			echo ""
+			echo "To undo the effects of --disable-mail-test, use --enable-mail-test."
+			echo ""			
+			echo "If set here, \$CC will override the compiler in the Makefile."
+			echo ""
+			echo "\$CPPFLAGS, \$CFLAGS and \$LDFLAGS additions need to be supplied to make later."
+			echo ""
+			exit 0
+			;;
+
+		--platform=*)
+			PLATFORM="${opt#--platform=}"
+			case "$PLATFORM" in
+				Linux*|GNU/kFreeBSD*|GNU*|FreeBSD*|NetBSD*|OpenBSD*|SunOS*|Solaris|Darwin*|macOS)
+					;;
+				*)
+					die "Unknown platform: $PLATFORM\nMust be one of: Linux, macOS, FreeBSD, OpenBSD, NetBSD, GNU/kFreeBSD, GNU/Hurd, Solaris"
+					;;
+			esac
+			;;
+	esac
+done
+
+case "${PLATFORM:-`uname -a`}" in
+	Linux*)
+		echo "Configuring for linux"
+		conf/linux
+		if [ -f /etc/slackware-version ]
+		then
+			echo "Configuring for slackware"
+			conf/slackware
+		fi
+		;;
+
+	GNU/kFreeBSD*)
+		echo "Configuring for kfreebsd"
+		conf/kfreebsd
+		;;
+
+	GNU*)
+		echo "Configuring for hurd"
+		conf/gnuhurd
+		;;
+
+	FreeBSD*)
+		echo "Configuring for freebsd"
+		conf/freebsd
+		;;
+
+	NetBSD*)
+		echo "Configuring for netbsd"
+		conf/netbsd
+		;;
+
+	OpenBSD*)
+		echo "Configuring for openbsd"
+		conf/openbsd
+		;;
+
+	SunOS*|Solaris)
+		cc=""
+		solaris="solaris10"
+		[ "x`uname -r`" = "x5.8" ] && solaris="solaris8"
+		[ "x`uname -r`" = "x5.6" ] && solaris="solaris6"
+		if [ "`uname -m`" = sun4u ]
+		then
+			[ "x`which gcc 2>&-`" != "x" ] && cc="gcc"
+			[ "x`which cc 2>&-`"  != "x" ] && cc="cc"
+		else
+			[ "x`which cc 2>&-`"  != "x" ] && cc="cc"
+			[ "x`which gcc 2>&-`" != "x" ] && cc="gcc"
+		fi
+		[ "$cc" = "" ] && die "Failed to find a compiler"
+		echo "Configuring for $solaris (with $cc)"
+		conf/$solaris-$cc
+		;;
+
+	Darwin*|macOS)
+		echo "Configuring for macos"
+		conf/macosx
+		;;
+
+	*)
+		die "Unknown platform: Please configure manually"
+		;;
+esac
+
+# Set CC from $CC (for macports)
+
+if [ "x$CC" != x ]
+then
+	echo "Configuring CC as $CC"
+	conf/ccenv
+fi
+
+# Process command line options
+
+for opt in "$@"
+do
+	case "$opt" in
+		--platform=*)
+			;;
+		--prefix=*)
+			echo "Configuring $opt"
+			conf/prefix "$opt"
+			;;
+		--destdir=*)
+			echo "Configuring $opt"
+			conf/destdir "$opt"
+			;;
+		--enable-test)
+			echo "Configuring to include backup function implementations."
+			conf/test
+			;;
+		--enable-logind)
+			echo "Enabling systemd-logind/elogind support"
+			conf/logind --enable || exit 1
+			;;
+		--disable-logind)
+			echo "Disabling systemd-logind/elogind support"
+			conf/logind --disable
+			;;
+		--enable-mail-test)
+			echo "Configuring to include mail tests (default)."
+			conf/mail-test-start
+			;;
+		--disable-mail-test)
+			echo "Configuring to exclude mail tests."
+			conf/mail-test-stop
+			;;
+		*)
+			echo "$0: Unknown argument: $opt" >&2
+			exit 1
+			;;
+	esac
+done
+
+# Prepare for parallel make
+
+if [ x"`which gmake 2>&-`" != x"" ]
+then
+	gmake ready
+else
+	make ready
+fi
+
+exit 0
+
+# vi:set ts=4 sw=4:
